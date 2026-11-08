@@ -29,6 +29,7 @@ function defaults() {
     })),
     transactions: [],
     meta: { firstUseAt: Date.now(), lastBackupAt: null, lastDismissAt: null, rate: null },
+    budgets: { total: null, byCategory: {} }, // 每月預算（台幣），每個月都套用
   };
 }
 
@@ -39,6 +40,7 @@ export function load() {
   if (raw) {
     try {
       state = JSON.parse(raw);
+      migrate();
       return state;
     } catch {
       // 資料損毀：先另存一份，不直接覆蓋
@@ -48,6 +50,12 @@ export function load() {
   state = defaults();
   save();
   return state;
+}
+
+/** 舊版資料補上新欄位 */
+function migrate() {
+  if (!state.budgets) state.budgets = { total: null, byCategory: {} };
+  if (!state.budgets.byCategory) state.budgets.byCategory = {};
 }
 
 export function save() {
@@ -179,4 +187,26 @@ export function importRecords(records) {
 export function setMeta(patch) {
   Object.assign(state.meta, patch);
   save();
+}
+
+// ---------- 預算 ----------
+
+/** 設定每月總預算；amount 為 null 表示取消。 */
+export function setTotalBudget(amount) {
+  state.budgets.total = amount > 0 ? amount : null;
+  save();
+}
+
+/** 設定某分類的每月預算；amount 為 null 表示取消。 */
+export function setCategoryBudget(categoryId, amount) {
+  if (amount > 0) state.budgets.byCategory[categoryId] = amount;
+  else delete state.budgets.byCategory[categoryId];
+  save();
+}
+
+/** 目前有效的分類預算（排除已刪除的分類），依分類清單順序。 */
+export function activeCategoryBudgets() {
+  return activeCategories('expense')
+    .filter((c) => state.budgets.byCategory[c.id] > 0)
+    .map((c) => ({ category: c, limit: state.budgets.byCategory[c.id] }));
 }

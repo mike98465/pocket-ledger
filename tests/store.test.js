@@ -73,3 +73,26 @@ test('匯出→清空→匯入，資料完全還原', () => {
   const after = store.get().transactions.map(({ categoryId, ...rest }) => rest);
   assert.deepEqual(after, before);
 });
+
+test('預算：設定、取消；刪除的分類不列入；舊資料自動補欄位', () => {
+  const food = expenseCat('餐飲');
+  const fun = expenseCat('娛樂');
+  store.setTotalBudget(20000);
+  store.setCategoryBudget(food.id, 6000);
+  store.setCategoryBudget(fun.id, 2000);
+  assert.equal(store.get().budgets.total, 20000);
+  assert.deepEqual(store.activeCategoryBudgets().map((b) => [b.category.name, b.limit]), [['餐飲', 6000], ['娛樂', 2000]]);
+  store.archiveCategory(fun.id);
+  assert.deepEqual(store.activeCategoryBudgets().map((b) => b.category.name), ['餐飲']);
+  store.setCategoryBudget(food.id, null);
+  store.setTotalBudget(0);
+  assert.equal(store.get().budgets.total, null);
+  assert.deepEqual(store.activeCategoryBudgets(), []);
+
+  // 舊版資料沒有 budgets 欄位
+  const old = JSON.parse(mem.get('pocket-ledger.v1'));
+  delete old.budgets;
+  mem.set('pocket-ledger.v1', JSON.stringify(old));
+  store.load();
+  assert.deepEqual(store.get().budgets, { total: null, byCategory: {} });
+});

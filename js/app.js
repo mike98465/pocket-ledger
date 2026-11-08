@@ -1,13 +1,13 @@
 import {
   CURRENCIES, parseAmount, formatMoney, formatMinor, minorToInput, toTwd,
   localDate, monthKey, shiftMonth, monthSummary, toCsv, fromCsv, needsBackupReminder, draftProblem,
-  SORT_MODES, sortItems, isDateSort,
+  SORT_MODES, sortItems, isDateSort, budgetStatus, budgetCrossing, monthSpending, BUDGET_WARN_RATIO,
 } from './core.js';
 import * as store from './store.js';
 
 const RATE_URL = 'https://open.er-api.com/v6/latest/USD';
 const RATE_MAX_AGE = 6 * 3600 * 1000;
-const APP_VERSION = 'v6'; // 要和 sw.js 的 VERSION 一致（有測試檢查）
+const APP_VERSION = 'v7'; // 要和 sw.js 的 VERSION 一致（有測試檢查）
 
 const $screen = document.getElementById('screen');
 const $sheet = document.getElementById('sheet');
@@ -26,11 +26,12 @@ const ICON = {
 };
 
 let toastTimer;
-function toast(msg) {
+/** level：''（一般）、'warn'（快用完）、'over'（超支）。預算提醒停留久一點。 */
+function toast(msg, level = '') {
   $toast.textContent = msg;
-  $toast.classList.add('show');
+  $toast.className = `toast show ${level}`;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => $toast.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => $toast.classList.remove('show'), level ? 5000 : 2200);
 }
 
 function safe(fn) {
@@ -182,6 +183,7 @@ function renderRecord() {
             <span>${draft.rate ? `匯率 ${draft.rate}${draft.rateEdited ? '（自訂）' : ''}${amt ? ` · ≈ ${formatMoney(toTwd(amt, 'USD', draft.rate), 'TWD')}` : ''}` : '取得匯率中…'}</span>
             <button data-act="edit-rate">修改</button>
           </div>` : ''}
+        ${draft.type === 'expense' ? budgetHint(amt) : ''}
       </div>
 
       <div class="meta-row">
@@ -274,9 +276,108 @@ $screen.addEventListener('input', (e) => {
   if (e.target.id === 'd-date' && e.target.value) draft.date = e.target.value;
 });
 
+// ---------- 預算 ----------
+
+const PCT = (r) => `${Math.round(r * 100)}%`;
+
+/** 記帳畫面上的一行：記完這筆後，分類預算／總預算還剩多少。 */
+function budgetHint(amt) {
+  const s = store.get();
+  const catId = draftCategoryId();
+  const catLimit = s.budgets.byCategory[catId];
+  if (!s.budgets.total && !catLimit) return '';
+  const extra = amt && (draft.currency === 'TWD' || draft.rate > 0) ? toTwd(amt, draft.currency, draft.rate) : 0;
+  const spent = monthSpending(s.transactions, monthKey(draft.date));
+  const parts = [];
+  let worst = 'ok';
+  const add = (label, used, limit) => {
+    const st = budgetStatus(used + extra, limit);
+    if (!st) return;
+    if (st.level === 'over' || (st.level === 'warn' && worst === 'ok')) worst = st.level;
+    parts.push(st.level === 'over'
+      ? `${label}超支 ${formatMoney(-st.remaining, 'TWD')}`
+      : `${label}剩 ${formatMoney(st.remaining, 'TWD')}`);
+  };
+  add(esc(store.categoryById(catId)?.name || ''), spent.byCategory[catId] || 0, catLimit);
+  add('總預算', spent.total, s.budgets.total);
+  const icon = worst === 'ok' ? '' : '⚠️ ';
+  return `<div class="budget-line num ${worst}">${icon}${extra ? '記完後 ' : '本月 '}${parts.join(' · ')}</div>`;
+}
+
+/** 存檔後檢查：這筆有沒有讓預算跨過 80% 或 100%。有就回傳提醒文字與等級。 */
+function budgetAlert(rec, before) {
+  if (rec.type !== 'expense') return null;
+  const s = store.get();
+  const after = monthSpending(s.transactions, monthKey(rec.date));
+  const checks = [
+    [rec.categoryName, before.byCategory[rec.categoryId] || 0, after.byCategory[rec.categoryId] || 0, s.budgets.byCategory[rec.categoryId]],
+    ['總預算', before.total, after.total, s.budgets.total],
+  ];
+  const lines = [];
+  let level = null;
+  for (const [name, b, a, limit] of checks) {
+    const crossed = budgetCrossing(b, a, limit);
+    if (!crossed) continue;
+    if (crossed === 'over') {
+      level = 'over';
+      lines.push(`${name}已超支 ${formatMoney(a - limit, 'TWD')}（預算 ${formatMoney(limit, 'TWD')}）`);
+    } else {
+      level = level || 'warn';
+      lines.push(`${name}已用 ${PCT(a / limit)}，剩 ${formatMoney(limit - a, 'TWD')}`);
+    }
+  }
+  const month = monthKey(rec.date) === monthKey(localDate()) ? '' : `${Number(rec.date.slice(5, 7))}月 `;
+  return level ? { level, text: `⚠️ ${month}${lines.join('\n')}` } : null;
+}
+
+/** 統計頁的預算卡片：每個預算一條進度條，顏色＋文字一起標示狀態（不只靠顏色）。 */
+function budgetCard(key) {
+  const s = store.get();
+  const spent = monthSpending(s.transactions, key);
+  const rows = [];
+  if (s.budgets.total) rows.push({ name: '總預算', used: spent.total, limit: s.budgets.total, color: null });
+  for (const { category, limit } of store.activeCategoryBudgets()) {
+    rows.push({ name: category.name, used: spent.byCategory[category.id] || 0, limit, color: seriesColor(category) });
+  }
+  if (!rows.length) return '';
+  const label = { ok: '', warn: '⚠️ 快用完', over: '⛔ 超支' };
+  return `
+    <h2>本月預算</h2>
+    <div class="card budget-card">
+      ${rows.map((r) => {
+        const st = budgetStatus(r.used, r.limit);
+        return `
+        <div class="budget-row ${st.level}">
+          <div class="budget-top">
+            <span class="name">${r.color ? `<span class="dot" style="background:${r.color}"></span>` : ''}${esc(r.name)}</span>
+            <span class="num nums">${formatMinor(r.used, 'TWD')} / ${formatMinor(r.limit, 'TWD')}</span>
+          </div>
+          <div class="bar" role="progressbar" aria-label="${esc(r.name)}預算" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(st.ratio * 100)}">
+            <span style="width:${Math.min(st.ratio, 1) * 100}%"></span>
+          </div>
+          <div class="budget-foot num">
+            <span class="status">${label[st.level]}</span>
+            <span>${st.level === 'over' ? `超出 ${formatMoney(-st.remaining, 'TWD')}` : `剩 ${formatMoney(st.remaining, 'TWD')}（已用 ${PCT(st.ratio)}）`}</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+/** 詢問預算金額。回傳 undefined＝不變（取消或輸入錯誤）、null＝取消預算、數字＝新預算。 */
+function askBudget(title, current) {
+  const v = prompt(`${title}（新台幣，留空＝不設定）`, current ? String(current) : '');
+  if (v == null) return undefined;
+  if (!v.trim()) return null;
+  const n = parseAmount(v, 'TWD');
+  if (n == null) { toast('請輸入正整數金額'); return undefined; }
+  return n;
+}
+
 function saveDraft() {
   if (!canSave()) return;
   safe(() => {
+    const before = monthSpending(store.get().transactions, monthKey(draft.date));
     const rec = store.addTransaction({
       type: draft.type,
       currency: draft.currency,
@@ -288,8 +389,16 @@ function saveDraft() {
     });
     draft.input = '';
     draft.note = '';
-    navigator.vibrate?.(10);
-    toast(`已記錄 ${rec.note || rec.categoryName} ${formatMoney(rec.amount, rec.currency)}`);
+    const saved = `已記錄 ${rec.note || rec.categoryName} ${formatMoney(rec.amount, rec.currency)}`;
+    const warning = budgetAlert(rec, before);
+    if (warning) {
+      navigator.vibrate?.([30, 60, 30]);
+      toast(`${saved}
+${warning.text}`, warning.level);
+    } else {
+      navigator.vibrate?.(10);
+      toast(saved);
+    }
     renderRecord();
     setTimeout(reloadIfIdle, 1500); // 有新版就趁現在換
   });
@@ -377,6 +486,8 @@ function renderStats() {
       <div class="card tile"><div class="label">支出 NT$</div><div class="value num">${formatMinor(sum.expense, 'TWD')}</div></div>
       <div class="card tile"><div class="label">結餘 NT$</div><div class="value num" style="color:${sum.balance < 0 ? 'var(--expense)' : 'var(--text)'}">${sum.balance < 0 ? '-' : ''}${formatMinor(Math.abs(sum.balance), 'TWD')}</div></div>
     </div>
+
+    ${budgetCard(ui.month)}
 
     <h2>支出分類（美金已換算台幣）</h2>
     <div class="card chart-card">
@@ -571,6 +682,23 @@ function renderSettings() {
   $screen.innerHTML = `
     <h1>設定</h1>
 
+    <h2>每月預算</h2>
+    <div class="card group">
+      <button class="row" data-budget="total">
+        <span class="grow">總預算</span>
+        <span class="detail num">${s.budgets.total ? formatMoney(s.budgets.total, 'TWD') : '未設定'}</span>
+        <span class="link">設定</span>
+      </button>
+      ${store.activeCategories('expense').map((c) => `
+        <button class="row" data-budget="${c.id}">
+          <span class="dot" style="background:${seriesColor(c)}"></span>
+          <span class="grow">${esc(c.name)}</span>
+          <span class="detail num">${s.budgets.byCategory[c.id] ? formatMoney(s.budgets.byCategory[c.id], 'TWD') : '未設定'}</span>
+          <span class="link">設定</span>
+        </button>`).join('')}
+    </div>
+    <p class="foot">每個月套用同一組預算，美金支出換算成台幣計算。用到 ${PCT(BUDGET_WARN_RATIO)} 時提醒快用完，超過預算時提醒超支；記帳畫面會顯示還剩多少。</p>
+
     <h2>分類</h2>
     <div class="seg" role="group" aria-label="分類類型" style="margin-bottom:8px">
       <button data-ctype="expense" aria-pressed="${settingsUi.catType === 'expense'}">支出分類</button>
@@ -634,6 +762,19 @@ $screen.addEventListener('click', async (e) => {
     return safe(() => { store.archiveCategory(c.id); renderSettings(); });
   }
   const act = b.dataset.act;
+  if (b.dataset.budget) {
+    const isTotal = b.dataset.budget === 'total';
+    const c = isTotal ? null : store.categoryById(b.dataset.budget);
+    const cur = isTotal ? store.get().budgets.total : store.get().budgets.byCategory[c.id];
+    const v = askBudget(isTotal ? '每月總預算' : `「${c.name}」每月預算`, cur);
+    if (v === undefined) return;
+    return safe(() => {
+      if (isTotal) store.setTotalBudget(v);
+      else store.setCategoryBudget(c.id, v);
+      toast(v ? `已設定 ${formatMoney(v, 'TWD')}` : '已取消預算');
+      renderSettings();
+    });
+  }
   if (act === 'add-cat') {
     const name = prompt(settingsUi.catType === 'expense' ? '新增支出分類' : '新增收入分類');
     if (name == null) return;

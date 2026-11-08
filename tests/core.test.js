@@ -135,3 +135,33 @@ test('sortItems：四種排序，不改原陣列', async () => {
   assert.equal(isDateSort('oldest'), true);
   assert.equal(isDateSort('amountAsc'), false);
 });
+
+test('budgetStatus：沒設預算回 null；80% 以上 warn；超過 100% 才算 over', async () => {
+  const { budgetStatus } = await import('../js/core.js');
+  assert.equal(budgetStatus(500, null), null);
+  assert.equal(budgetStatus(500, 0), null);
+  assert.equal(budgetStatus(7999, 10000).level, 'ok');
+  assert.equal(budgetStatus(8000, 10000).level, 'warn');
+  assert.equal(budgetStatus(10000, 10000).level, 'warn'); // 剛好用完還不算超支
+  const s = budgetStatus(10001, 10000);
+  assert.equal(s.level, 'over');
+  assert.equal(s.remaining, -1);
+});
+
+test('budgetCrossing：只在跨過門檻那一筆提醒', async () => {
+  const { budgetCrossing } = await import('../js/core.js');
+  assert.equal(budgetCrossing(7000, 7500, 10000), null); // 還沒到 80%
+  assert.equal(budgetCrossing(7500, 8200, 10000), 'warn'); // 跨過 80%
+  assert.equal(budgetCrossing(8200, 9000, 10000), null); // 已經提醒過
+  assert.equal(budgetCrossing(9000, 10500, 10000), 'over'); // 跨過 100%
+  assert.equal(budgetCrossing(7000, 12000, 10000), 'over'); // 一次跨兩級只提醒超支
+  assert.equal(budgetCrossing(10500, 11000, 10000), null); // 已超支過
+  assert.equal(budgetCrossing(0, 50000, null), null); // 沒設預算
+});
+
+test('monthSpending：只算該月支出', async () => {
+  const { monthSpending } = await import('../js/core.js');
+  const r = monthSpending(txs, '2026-11');
+  assert.equal(r.total, 170);
+  assert.deepEqual(r.byCategory, { traffic: 50, food: 120 });
+});

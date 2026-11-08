@@ -84,6 +84,43 @@ export function monthSummary(transactions, key, categories = []) {
   return { income, expense, balance: income - expense, byCategory, items };
 }
 
+// ---------- 預算 ----------
+
+export const BUDGET_WARN_RATIO = 0.8; // 用到 80% 提醒「快用完」
+
+/** 預算狀態。limit 沒設（null/0）回傳 null。level：ok / warn（≥80%）/ over（>100%）。 */
+export function budgetStatus(spent, limit) {
+  if (!(limit > 0)) return null;
+  const ratio = spent / limit;
+  const level = spent > limit ? 'over' : ratio >= BUDGET_WARN_RATIO ? 'warn' : 'ok';
+  return { spent, limit, ratio, remaining: limit - spent, level };
+}
+
+/**
+ * 這筆支出有沒有讓預算「跨過」門檻？只在跨過的那一刻提醒一次，不重複轟炸。
+ * 回傳 'over'、'warn' 或 null。
+ */
+export function budgetCrossing(before, after, limit) {
+  const a = budgetStatus(before, limit);
+  const b = budgetStatus(after, limit);
+  if (!a || !b || a.level === b.level) return null;
+  if (b.level === 'over') return 'over';
+  if (b.level === 'warn' && a.level === 'ok') return 'warn';
+  return null;
+}
+
+/** 某月各分類支出（台幣）與總支出。 */
+export function monthSpending(transactions, key) {
+  const byCategory = {};
+  let total = 0;
+  for (const t of transactions) {
+    if (t.type !== 'expense' || monthKey(t.date) !== key) continue;
+    total += t.twd;
+    byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + t.twd;
+  }
+  return { total, byCategory };
+}
+
 // ---------- 明細排序 ----------
 
 export const SORT_MODES = {
