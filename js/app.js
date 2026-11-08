@@ -1,6 +1,6 @@
 import {
   CURRENCIES, parseAmount, formatMoney, formatMinor, minorToInput, toTwd,
-  localDate, monthKey, shiftMonth, monthSummary, toCsv, fromCsv, needsBackupReminder,
+  localDate, monthKey, shiftMonth, monthSummary, toCsv, fromCsv, needsBackupReminder, draftProblem,
 } from './core.js';
 import * as store from './store.js';
 
@@ -121,8 +121,23 @@ function draftAmount() {
   return parseAmount(draft.input, draft.currency);
 }
 
+function draftIssue() {
+  return draftProblem({
+    amount: draftAmount(), title: draft.note, categoryId: draftCategoryId(),
+    currency: draft.currency, rate: draft.rate,
+  });
+}
+
 function canSave() {
-  return draftAmount() != null && draftCategoryId() && (draft.currency === 'TWD' || draft.rate > 0);
+  return draftIssue() == null;
+}
+
+// 打字時不重畫整個畫面（避免鍵盤收起），只更新儲存鈕
+function updateSaveButton() {
+  const btn = $screen.querySelector('[data-act="save"]');
+  if (!btn) return;
+  btn.disabled = !canSave();
+  btn.textContent = draftIssue() ?? '儲存';
 }
 
 function renderRecord() {
@@ -169,7 +184,7 @@ function renderRecord() {
       </div>
 
       <div class="meta-row">
-        <label class="title-input"><input type="text" id="d-note" placeholder="${draft.type === 'expense' ? '買了什麼？例如：午餐便當' : '什麼收入？例如：VOO 股息'}" value="${esc(draft.note)}" maxlength="40" enterkeyhint="done" aria-label="項目"></label>
+        <label class="title-input"><input type="text" id="d-note" placeholder="${draft.type === 'expense' ? '買了什麼？例如：午餐便當' : '什麼收入？例如：VOO 股息'}" value="${esc(draft.note)}" maxlength="40" enterkeyhint="done" aria-label="項目（必填）" required aria-required="true"></label>
         <label class="date-input"><input type="date" id="d-date" value="${draft.date}" max="9999-12-31" aria-label="日期"></label>
       </div>
 
@@ -186,7 +201,7 @@ function renderRecord() {
         <button class="key num" data-key="0">0</button>
         <button class="key" data-key="del" aria-label="刪除">${ICON.del}</button>
       </div>
-      <button class="save" data-act="save" ${canSave() ? '' : 'disabled'}>儲存</button>
+      <button class="save" data-act="save" ${canSave() ? '' : 'disabled'}>${draftIssue() ?? '儲存'}</button>
     </div>`;
 
   if (draft.currency === 'USD' && !draft.rateEdited) {
@@ -251,7 +266,10 @@ $screen.addEventListener('click', (e) => {
 
 $screen.addEventListener('input', (e) => {
   if (ui.tab !== 'record') return;
-  if (e.target.id === 'd-note') draft.note = e.target.value;
+  if (e.target.id === 'd-note') {
+    draft.note = e.target.value;
+    updateSaveButton();
+  }
   if (e.target.id === 'd-date' && e.target.value) draft.date = e.target.value;
 });
 
@@ -440,7 +458,7 @@ function openEditor(id) {
             <select id="e-cat">${options.map((c) => `<option value="${c.id}" ${c.id === e.categoryId ? 'selected' : ''}>${esc(c.name)}${c.archived ? '（已刪除）' : ''}</option>`).join('')}</select>
           </label>
           <label class="field"><span>日期</span><input id="e-date" type="date" value="${e.date}"></label>
-          <label class="field"><span>項目</span><input id="e-note" value="${esc(e.note)}" maxlength="40" placeholder="買了什麼（可不填）"></label>
+          <label class="field"><span>項目</span><input id="e-note" value="${esc(e.note)}" maxlength="40" placeholder="必填" required></label>
         </div>
         <button type="button" class="danger-btn" data-act="delete">刪除這筆</button>
       </form>`;
@@ -478,6 +496,10 @@ function openEditor(id) {
       readForm();
       const amount = parseAmount(e._amt, e.currency);
       if (amount == null) return toast(e.currency === 'TWD' ? '台幣金額要是正整數' : '美金金額最多 2 位小數');
+      if (!e.note.trim()) {
+        $sheet.querySelector('#e-note').focus();
+        return toast('項目不能空白');
+      }
       let rate = null;
       if (e.currency === 'USD') {
         rate = Number(e._rate);

@@ -104,3 +104,15 @@ test('fromCsv：舊版「備註」欄位也能匯入成項目', () => {
 test('toCsv：欄位名稱是「項目」', () => {
   assert.ok(toCsv([]).startsWith('﻿日期,類型,分類,幣別,金額,匯率,台幣金額,項目,'));
 });
+
+test('draftProblem：項目必填，依序提示缺什麼', async () => {
+  const { draftProblem } = await import('../js/core.js');
+  const ok = { amount: 100, title: '午餐', categoryId: 'c', currency: 'TWD', rate: null };
+  assert.equal(draftProblem(ok), null);
+  assert.equal(draftProblem({ ...ok, amount: null }), '儲存'); // 還沒輸入金額：按鈕維持「儲存」但不能按
+  assert.equal(draftProblem({ ...ok, title: '' }), '請先輸入項目');
+  assert.equal(draftProblem({ ...ok, title: '   ' }), '請先輸入項目');
+  assert.equal(draftProblem({ ...ok, categoryId: undefined }), '請先選分類');
+  assert.equal(draftProblem({ ...ok, currency: 'USD', rate: null }), '請先設定匯率');
+  assert.equal(draftProblem({ ...ok, currency: 'USD', rate: 32.8 }), null);
+});

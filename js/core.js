@@ -186,6 +186,18 @@ export function fromCsv(text) {
   return { records, errors };
 }
 
+/**
+ * 一筆新紀錄缺什麼？全部齊了回傳 null，否則回傳要顯示在儲存鈕上的提示。
+ * 依序檢查：金額 → 項目（必填）→ 分類 → 美金匯率。
+ */
+export function draftProblem({ amount, title, categoryId, currency, rate }) {
+  if (amount == null) return '儲存';
+  if (!String(title ?? '').trim()) return '請先輸入項目';
+  if (!categoryId) return '請先選分類';
+  if (currency === 'USD' && !(rate > 0)) return '請先設定匯率';
+  return null;
+}
+
 /** 備份提醒：距離「上次備份／上次略過／開始使用」超過 days 天，且有資料。 */
 export function needsBackupReminder({ txCount, lastBackupAt, lastDismissAt, firstUseAt }, now = Date.now(), days = 30) {
   if (!txCount) return false;

@@ -1,6 +1,6 @@
 // 離線快取：App 本身的檔案先用快取開（秒開、離線可用），背景再更新，下次開啟就是新版。
 // 改了任何檔案就把 VERSION 加一。
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE = `pocket-ledger-${VERSION}`;
 const ASSETS = [
   './',
