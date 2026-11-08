@@ -30,6 +30,7 @@ function defaults() {
     transactions: [],
     meta: { firstUseAt: Date.now(), lastBackupAt: null, lastDismissAt: null, rate: null },
     budgets: { total: null, byCategory: {} }, // 每月預算（台幣），每個月都套用
+    security: defaultSecurity(),
   };
 }
 
@@ -56,6 +57,12 @@ export function load() {
 function migrate() {
   if (!state.budgets) state.budgets = { total: null, byCategory: {} };
   if (!state.budgets.byCategory) state.budgets.byCategory = {};
+  if (!state.security) state.security = defaultSecurity();
+}
+
+// 開啟密碼設定：只屬於這支手機，不放進完整備份
+function defaultSecurity() {
+  return { pin: null, relockAfterMs: 60000, failed: 0, lockedUntil: 0 };
 }
 
 export function save() {
@@ -289,4 +296,47 @@ export function restoreBackup(raw) {
   }
   save();
   return { added, skipped, categories: restored.length };
+}
+
+// ---------- 開啟密碼 ----------
+
+export const security = () => state.security;
+
+/** 設定或關閉密碼（record 為 null＝關閉） */
+export function setPinRecord(record) {
+  state.security.pin = record;
+  state.security.failed = 0;
+  state.security.lockedUntil = 0;
+  save();
+}
+
+export function setRelockAfter(ms) {
+  state.security.relockAfterMs = ms;
+  save();
+}
+
+/** 記錄一次輸錯；回傳新的 failed 次數。lockedUntil 由呼叫端依 lockoutMs 設定。 */
+export function recordPinFailure(lockedUntil) {
+  state.security.failed += 1;
+  state.security.lockedUntil = lockedUntil(state.security.failed);
+  save();
+  return state.security.failed;
+}
+
+export function resetPinFailures() {
+  if (!state.security.failed && !state.security.lockedUntil) return;
+  state.security.failed = 0;
+  state.security.lockedUntil = 0;
+  save();
+}
+
+/** 忘記密碼：清除這支手機上的所有記帳資料（之後可用完整備份還原）。 */
+export function eraseAll() {
+  localStorage.removeItem(KEY);
+  state = null;
+}
+
+/** 資料大小（位元組，UTF-16 字元數 × 2 的近似值） */
+export function storageBytes() {
+  return (localStorage.getItem(KEY) || '').length * 2;
 }

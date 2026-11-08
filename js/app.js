@@ -4,10 +4,13 @@ import {
   SORT_MODES, sortItems, isDateSort, budgetStatus, budgetCrossing, monthSpending, BUDGET_WARN_RATIO,
 } from './core.js';
 import * as store from './store.js';
+import {
+  PIN_LENGTH, MAX_FREE_ATTEMPTS, RELOCK_OPTIONS, hashPin, verifyPin, lockoutMs, shouldRelock,
+} from './lock.js';
 
 const RATE_URL = 'https://open.er-api.com/v6/latest/USD';
 const RATE_MAX_AGE = 6 * 3600 * 1000;
-const APP_VERSION = 'v8'; // 要和 sw.js 的 VERSION 一致（有測試檢查）
+const APP_VERSION = 'v9'; // 要和 sw.js 的 VERSION 一致（有測試檢查）
 
 const $screen = document.getElementById('screen');
 const $sheet = document.getElementById('sheet');
@@ -529,6 +532,13 @@ function renderStats() {
 }
 
 $screen.addEventListener('change', (e) => {
+  if (ui.tab === 'settings' && e.target.id === 'relock') {
+    store.setRelockAfter(Number(e.target.value));
+    toast(`離開 ${RELOCK_OPTIONS[e.target.value]}${e.target.value === '0' ? '' : '後'}就要重新輸入密碼`);
+  }
+});
+
+$screen.addEventListener('change', (e) => {
   if (ui.tab !== 'stats' || e.target.id !== 'sort-mode') return;
   store.setMeta({ sortMode: e.target.value }); // 記住選擇
   renderStats();
@@ -675,6 +685,7 @@ function openEditor(id) {
 const settingsUi = { catType: 'expense' };
 
 function renderSettings() {
+  const sec = store.security();
   const s = store.get();
   const cats = store.activeCategories(settingsUi.catType);
   const last = s.meta.lastBackupAt ? new Date(s.meta.lastBackupAt).toLocaleDateString('zh-TW') : '從未備份';
@@ -716,6 +727,21 @@ function renderSettings() {
     </div>
     <p class="foot">刪除分類後，舊紀錄會保留原本的分類名稱。「其他」永遠排在最後。</p>
 
+    <h2>安全性</h2>
+    <div class="card group">
+      ${sec.pin ? `
+        <div class="row"><span class="grow">開啟密碼</span><span class="detail">已開啟</span></div>
+        <label class="row"><span class="grow">離開多久後要重新輸入</span>
+          <select id="relock" class="row-select">
+            ${Object.entries(RELOCK_OPTIONS).map(([ms, label]) => `<option value="${ms}" ${Number(ms) === sec.relockAfterMs ? 'selected' : ''}>${label}</option>`).join('')}
+          </select>
+        </label>
+        <button class="row action" data-act="pin-change">變更密碼</button>
+        <button class="row" data-act="pin-off"><span class="del">關閉開啟密碼</span></button>`
+      : `<button class="row action" data-act="pin-on">開啟密碼（${PIN_LENGTH} 位數字）</button>`}
+    </div>
+    <p class="foot">開啟後，打開 App、或離開一段時間再回來，都要輸入密碼。這是「畫面鎖」：能擋住拿到你解鎖手機的人，但資料本身沒有加密。<b>忘記密碼只能清除這支手機的資料，再用完整備份還原</b>，請記得定期備份。</p>
+
     <h2>備份</h2>
     <div class="card group">
       <button class="row action" data-act="backup-full">匯出完整備份（含分類、預算、設定）</button>
@@ -733,10 +759,20 @@ function renderSettings() {
     </div>
     <p class="foot">${rate ? `資料更新：${esc(rate.updatedAt || '')}<br>` : ''}匯率來源：<a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">Rates By Exchange Rate API</a>（每日更新）。每筆美金紀錄會存下當時的匯率，之後匯率變動不影響舊帳。</p>
 
+    <h2>資料存放位置</h2>
+    <div class="card group">
+      <div class="row"><span class="grow">執行方式</span><span class="detail">${isStandalone() ? '主畫面 App ✓' : 'Safari 分頁 ⚠️'}</span></div>
+      <div class="row"><span class="grow">資料所屬網址</span><span class="detail">${esc(location.host + location.pathname.replace(/index\.html$/, ''))}</span></div>
+      <div class="row"><span class="grow">資料大小</span><span class="detail num">${(store.storageBytes() / 1024).toFixed(1)} KB · ${s.transactions.length} 筆</span></div>
+      <div class="row"><span class="grow">儲存狀態</span><span class="detail" id="persist">檢查中…</span></div>
+    </div>
+    <p class="foot">${isStandalone()
+      ? '資料存在 iPhone 系統替這個主畫面 App 單獨保留的網頁儲存空間（和 Safari 分開），不會出現在「檔案」App，也不會上傳到任何伺服器。<b>刪除主畫面上的圖示會一併刪除資料</b>，刪除前請先匯出完整備份。'
+      : '你現在是用 Safari 分頁開啟，這裡的資料和主畫面 App 是<b>分開的兩份</b>，而且可能被系統清除。請改用主畫面上的「記帳本」圖示開啟。'}</p>
+
     <h2>關於</h2>
     <div class="card group">
       <div class="row"><span class="grow">版本</span><span class="detail">${APP_VERSION}</span></div>
-      <div class="row"><span class="grow">儲存狀態</span><span class="detail" id="persist">檢查中…</span></div>
     </div>
   `;
   const $persist = document.getElementById('persist');
@@ -763,6 +799,22 @@ $screen.addEventListener('click', async (e) => {
     return safe(() => { store.archiveCategory(c.id); renderSettings(); });
   }
   const act = b.dataset.act;
+  if (act === 'pin-on') {
+    if (await setupPin()) { toast('已開啟密碼'); markUnlocked(); }
+    return renderSettings();
+  }
+  if (act === 'pin-change') {
+    if (!(await verifyCurrentPin())) return;
+    if (await setupPin()) toast('已變更密碼');
+    markUnlocked();
+    return renderSettings();
+  }
+  if (act === 'pin-off') {
+    if (!(await verifyCurrentPin())) return;
+    store.setPinRecord(null);
+    toast('已關閉開啟密碼');
+    return renderSettings();
+  }
   if (b.dataset.budget) {
     const isTotal = b.dataset.budget === 'total';
     const c = isTotal ? null : store.categoryById(b.dataset.budget);
@@ -881,6 +933,168 @@ document.addEventListener('touchmove', (e) => {
   if (e.touches.length > 1) e.preventDefault();
 }, { passive: false });
 
+// ---------- 開啟密碼 ----------
+
+const $lock = document.getElementById('lock');
+let locked = false;
+let hiddenAt = null;
+const UNLOCK_KEY = 'pocket-ledger.unlockedAt';
+
+const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+
+/** 自動更新重新載入時，不要再問一次密碼（10 秒內、且畫面在前景才算） */
+function markUnlocked() {
+  try { sessionStorage.setItem(UNLOCK_KEY, String(Date.now())); } catch { /* 私密模式 */ }
+}
+function recentlyUnlocked() {
+  try {
+    const t = Number(sessionStorage.getItem(UNLOCK_KEY));
+    return document.visibilityState === 'visible' && Date.now() - t < 10000;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 全螢幕數字鍵盤。onSubmit(pin) 回傳 {ok:true} 關閉，或 {error:'訊息'} 清空重打。
+ * guard：套用「輸錯太多次要等」的限制（解鎖、驗證目前密碼時）。回傳輸入的密碼，按取消回傳 null。
+ */
+function pinPad({ title, subtitle = '', cancellable = true, guard = false, forgot = false, onSubmit }) {
+  return new Promise((resolve) => {
+    let pin = '';
+    let busy = false;
+    let timer;
+    let message = subtitle;
+    let isError = false;
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', cancellable ? 'cancel' : '', '0', 'del'];
+    const draw = () => {
+      clearTimeout(timer);
+      const wait = guard ? store.security().lockedUntil - Date.now() : 0;
+      const waiting = wait > 0;
+      if (waiting) timer = setTimeout(draw, 1000);
+      $lock.innerHTML = `
+        <div class="lock-inner">
+          <div class="lock-icon" aria-hidden="true">🔒</div>
+          <h3>${title}</h3>
+          <p class="lock-sub ${isError || waiting ? 'error' : ''}" aria-live="assertive">${waiting ? `輸錯太多次，請 ${Math.ceil(wait / 1000)} 秒後再試` : message}</p>
+          <div class="pin-dots ${isError ? 'shake' : ''}" aria-label="已輸入 ${pin.length} 位">
+            ${Array.from({ length: PIN_LENGTH }, (_, i) => `<span class="${i < pin.length ? 'on' : ''}"></span>`).join('')}
+          </div>
+          <div class="pin-pad">
+            ${keys.map((k) => {
+              if (!k) return '<span></span>';
+              if (k === 'cancel') return '<button class="pin-key text" data-pin="cancel">取消</button>';
+              if (k === 'del') return `<button class="pin-key text" data-pin="del" aria-label="刪除" ${pin ? '' : 'disabled'}>⌫</button>`;
+              return `<button class="pin-key num" data-pin="${k}" ${waiting ? 'disabled' : ''}>${k}</button>`;
+            }).join('')}
+          </div>
+          ${forgot ? '<button class="lock-link" data-pin="forgot">忘記密碼？</button>' : ''}
+        </div>`;
+    };
+    const close = (value) => {
+      clearTimeout(timer);
+      $lock.onclick = null;
+      $lock.close();
+      resolve(value);
+    };
+    $lock.onclick = async (e) => {
+      const b = e.target.closest('[data-pin]');
+      if (!b || b.disabled || busy) return;
+      const k = b.dataset.pin;
+      if (k === 'cancel') return close(null);
+      if (k === 'forgot') return forgotPin();
+      isError = false;
+      message = subtitle;
+      if (k === 'del') { pin = pin.slice(0, -1); return draw(); }
+      if (pin.length >= PIN_LENGTH) return;
+      pin += k;
+      draw();
+      if (pin.length < PIN_LENGTH) return;
+      busy = true;
+      const entered = pin;
+      const r = await onSubmit(entered);
+      busy = false;
+      if (r?.ok) return close(entered);
+      pin = '';
+      isError = true;
+      message = r?.error || '密碼錯誤';
+      navigator.vibrate?.(120);
+      draw();
+    };
+    $lock.oncancel = (e) => { if (!cancellable) e.preventDefault(); };
+    draw();
+    if (!$lock.open) $lock.showModal();
+  });
+}
+
+/** 檢查密碼（含輸錯次數限制） */
+async function checkPin(pin) {
+  const sec = store.security();
+  if (sec.lockedUntil > Date.now()) return { error: '請稍後再試' };
+  if (await verifyPin(pin, sec.pin)) {
+    store.resetPinFailures();
+    return { ok: true };
+  }
+  const n = store.recordPinFailure((f) => (lockoutMs(f) ? Date.now() + lockoutMs(f) : 0));
+  const left = MAX_FREE_ATTEMPTS - n;
+  return { error: left > 0 ? `密碼錯誤（再錯 ${left} 次就要等候）` : '密碼錯誤' };
+}
+
+async function lockApp() {
+  if (locked || !store.security().pin) return;
+  locked = true;
+  if ($sheet.open) $sheet.close();
+  document.body.classList.add('privacy');
+  await pinPad({ title: '輸入密碼', subtitle: '解鎖口袋記帳本', cancellable: false, guard: true, forgot: true, onSubmit: checkPin });
+  locked = false;
+  document.body.classList.remove('privacy');
+  markUnlocked();
+}
+
+/** 設定新密碼：輸入兩次一致才存。按取消回傳 false。 */
+async function setupPin() {
+  for (;;) {
+    const first = await pinPad({ title: '設定開啟密碼', subtitle: `輸入 ${PIN_LENGTH} 位數字`, onSubmit: async () => ({ ok: true }) });
+    if (first == null) return false;
+    let same = false;
+    const second = await pinPad({ title: '再輸入一次', subtitle: '確認新密碼', onSubmit: async (p) => { same = p === first; return { ok: true }; } });
+    if (second == null) return false;
+    if (same) {
+      store.setPinRecord(await hashPin(first));
+      return true;
+    }
+    toast('兩次輸入不一樣，請重新設定');
+  }
+}
+
+/** 變更或關閉密碼前，先驗證目前的密碼 */
+async function verifyCurrentPin() {
+  const r = await pinPad({ title: '輸入目前的密碼', guard: true, onSubmit: checkPin });
+  return r != null;
+}
+
+function forgotPin() {
+  const ok = confirm('忘記密碼只能清除這支手機上的所有記帳資料（紀錄、分類、預算），之後再用「完整備份」還原。\n\n確定要清除嗎？');
+  if (!ok) return;
+  if (!confirm('最後確認：清除後無法復原，沒有備份的資料會永久消失。')) return;
+  store.eraseAll();
+  try { sessionStorage.removeItem(UNLOCK_KEY); } catch { /* 忽略 */ }
+  location.reload();
+}
+
+// 離開 App 時先蓋住畫面（App 切換器的縮圖才不會露出金額），回來時依設定決定要不要重新上鎖
+document.addEventListener('visibilitychange', () => {
+  if (!store.security()?.pin) return;
+  if (document.visibilityState === 'hidden') {
+    hiddenAt = Date.now();
+    if (!locked) document.body.classList.add('privacy');
+  } else {
+    if (shouldRelock(hiddenAt, Date.now(), store.security().relockAfterMs)) lockApp();
+    else if (!locked) document.body.classList.remove('privacy');
+    hiddenAt = null;
+  }
+});
+
 // ---------- 啟動 ----------
 
 try {
@@ -890,7 +1104,8 @@ try {
   throw e;
 }
 navigator.storage?.persist?.();
-render();
+if (store.security().pin && !recentlyUnlocked()) lockApp().then(render);
+else render();
 ensureRate().then((r) => { if (r && !draft.rateEdited) draft.rate = r.value; });
 
 // 回到前景時，日期若跨日就更新成今天
@@ -913,7 +1128,9 @@ $sheet.addEventListener('close', () => setTimeout(reloadIfIdle, 1500));
 function reloadIfIdle() {
   if (!updateReady) return;
   const busy = draft.input || draft.note.trim() || $sheet.open;
-  if (!busy) location.reload();
+  if (busy) return;
+  if (!locked) markUnlocked();
+  location.reload();
 }
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {

@@ -175,3 +175,37 @@ test('完整備份：新手機沒用過的預設分類，還原後不會多出�
   assert.ok(!names.includes('餐飲'), '不應該多出沒用過的「餐飲」');
   assert.equal(store.get().categories.length, backup.categories.length);
 });
+
+test('開啟密碼：設定只屬於這支手機，不會被備份或還原', () => {
+  store.setPinRecord({ hash: 'h', salt: 's', iterations: 1 });
+  store.setRelockAfter(0);
+  const backup = JSON.parse(JSON.stringify(store.exportBackup()));
+  assert.ok(!('security' in backup), '完整備份不能包含密碼');
+  mem.clear();
+  store.load();
+  store.restoreBackup(backup);
+  assert.equal(store.security().pin, null, '還原後不應帶入別支手機的密碼');
+});
+
+test('開啟密碼：輸錯次數累計、成功後歸零；舊資料自動補欄位', () => {
+  store.setPinRecord({ hash: 'h', salt: 's', iterations: 1 });
+  assert.equal(store.recordPinFailure(() => 0), 1);
+  assert.equal(store.recordPinFailure((n) => n * 1000), 2);
+  assert.equal(store.security().lockedUntil, 2000);
+  store.resetPinFailures();
+  assert.deepEqual([store.security().failed, store.security().lockedUntil], [0, 0]);
+
+  const old = JSON.parse(mem.get('pocket-ledger.v1'));
+  delete old.security;
+  mem.set('pocket-ledger.v1', JSON.stringify(old));
+  store.load();
+  assert.deepEqual(store.security(), { pin: null, relockAfterMs: 60000, failed: 0, lockedUntil: 0 });
+});
+
+test('eraseAll：清除後重新載入是全新資料', () => {
+  store.addTransaction({ type: 'expense', currency: 'TWD', amount: 1, categoryId: expenseCat('餐飲').id, date: '2026-11-01', note: 'x' });
+  store.eraseAll();
+  assert.equal(mem.get('pocket-ledger.v1'), undefined);
+  store.load();
+  assert.equal(store.get().transactions.length, 0);
+});
