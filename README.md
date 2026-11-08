@@ -36,6 +36,6 @@ npm run icons     # 重新產生 App 圖示
 - `js/core.js`：金額、匯率換算、統計、CSV（純邏輯，有測試）
 - `js/store.js`：本機儲存（localStorage）
 - `js/app.js`：畫面
-- `sw.js`：離線快取。**改了任何檔案要把 `VERSION` 加一**，iPhone 才會更新到新版（開啟兩次 App 後生效）。
+- `sw.js`：離線快取（有網路先拿最新版，離線才用快取）。**改了任何檔案要把 `sw.js` 的 `VERSION` 和 `js/app.js` 的 `APP_VERSION` 一起加一**（測試會檢查兩者一致）。App 回到前景時會自動檢查更新，閒置時自動換成新版；正在輸入時不打斷，存檔後才換。
 
 匯率來源：[Rates By Exchange Rate API](https://www.exchangerate-api.com)（`open.er-api.com`，免費、免金鑰、每日更新）。

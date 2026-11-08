@@ -6,7 +6,7 @@ import * as store from './store.js';
 
 const RATE_URL = 'https://open.er-api.com/v6/latest/USD';
 const RATE_MAX_AGE = 6 * 3600 * 1000;
-const APP_VERSION = '1.0.0';
+const APP_VERSION = 'v5'; // 要和 sw.js 的 VERSION 一致（有測試檢查）
 
 const $screen = document.getElementById('screen');
 const $sheet = document.getElementById('sheet');
@@ -290,6 +290,7 @@ function saveDraft() {
     navigator.vibrate?.(10);
     toast(`已記錄 ${rec.note || rec.categoryName} ${formatMoney(rec.amount, rec.currency)}`);
     renderRecord();
+    setTimeout(reloadIfIdle, 1500); // 有新版就趁現在換
   });
 }
 
@@ -689,7 +690,33 @@ document.addEventListener('visibilitychange', () => {
 });
 draft.lastToday = localDate();
 
+// ---------- 自動更新 ----------
+// 新版 service worker 接手後重新載入頁面；但正在輸入或開著編輯面板時先不打斷，等閒置再換。
+let updateReady = false;
+$sheet.addEventListener('close', () => setTimeout(reloadIfIdle, 1500));
+
+function reloadIfIdle() {
+  if (!updateReady) return;
+  const busy = draft.input || draft.note.trim() || $sheet.open;
+  if (!busy) location.reload();
+}
+
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW 註冊失敗', e));
+  const hadController = !!navigator.serviceWorker.controller; // 第一次安裝不用重新載入
+  navigator.serviceWorker
+    .register('sw.js', { updateViaCache: 'none' })
+    .then((reg) => {
+      // iPhone 上滑掉 App 不一定真的結束它，所以每次回到前景都檢查一次更新
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+        else reloadIfIdle();
+      });
+    })
+    .catch((e) => console.warn('SW 註冊失敗', e));
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) return;
+    updateReady = true;
+    reloadIfIdle();
+  });
 }
 
