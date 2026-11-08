@@ -7,7 +7,7 @@ import * as store from './store.js';
 
 const RATE_URL = 'https://open.er-api.com/v6/latest/USD';
 const RATE_MAX_AGE = 6 * 3600 * 1000;
-const APP_VERSION = 'v7'; // 要和 sw.js 的 VERSION 一致（有測試檢查）
+const APP_VERSION = 'v8'; // 要和 sw.js 的 VERSION 一致（有測試檢查）
 
 const $screen = document.getElementById('screen');
 const $sheet = document.getElementById('sheet');
@@ -263,7 +263,7 @@ $screen.addEventListener('click', (e) => {
     return renderRecord();
   }
   if (act === 'save') return saveDraft();
-  if (act === 'backup') return exportCsv();
+  if (act === 'backup') return exportFull();
   if (act === 'dismiss') { store.setMeta({ lastDismissAt: Date.now() }); return renderRecord(); }
 });
 
@@ -718,12 +718,13 @@ function renderSettings() {
 
     <h2>備份</h2>
     <div class="card group">
-      <button class="row action" data-act="export">匯出 CSV（可用 Excel 開啟）</button>
-      <button class="row action" data-act="import">從 CSV 匯入／還原</button>
-      <div class="row"><span class="grow">上次備份</span><span class="detail">${last}</span></div>
+      <button class="row action" data-act="backup-full">匯出完整備份（含分類、預算、設定）</button>
+      <button class="row action" data-act="import">從備份還原</button>
+      <button class="row action" data-act="export">匯出 CSV（給 Excel 看，只有紀錄）</button>
+      <div class="row"><span class="grow">上次完整備份</span><span class="detail">${last}</span></div>
       <div class="row"><span class="grow">紀錄筆數</span><span class="detail num">${s.transactions.length}</span></div>
     </div>
-    <p class="foot">資料只存在這支 iPhone 的這個 App 裡。換手機或刪除 App 前，請先匯出 CSV 存到「檔案」或雲端硬碟。匯入時重複的紀錄會自動略過。</p>
+    <p class="foot">資料只存在這支 iPhone 的這個 App 裡。換手機或刪除 App 前，請先「匯出完整備份」存到「檔案」或雲端硬碟，新手機用「從備份還原」選那個 .json 檔即可。<br>還原時：紀錄會合併（重複的略過）；分類、預算、排序以備份為準。也可以選 CSV 檔，只匯入紀錄。</p>
 
     <h2>匯率</h2>
     <div class="card group">
@@ -781,6 +782,7 @@ $screen.addEventListener('click', async (e) => {
     return safe(() => { store.addCategory(settingsUi.catType, name); renderSettings(); });
   }
   if (act === 'export') return exportCsv();
+  if (act === 'backup-full') return exportFull();
   if (act === 'import') { $file.value = ''; return $file.click(); }
   if (act === 'refresh-rate') {
     const r = await ensureRate(true);
@@ -792,12 +794,10 @@ $screen.addEventListener('click', async (e) => {
 
 // ---------- 匯出／匯入 ----------
 
-async function exportCsv() {
-  const s = store.get();
-  if (!s.transactions.length) return toast('還沒有紀錄可以匯出');
-  const name = `記帳備份-${localDate()}.csv`;
-  const blob = new Blob([toCsv(s.transactions)], { type: 'text/csv;charset=utf-8' });
-  const file = new File([blob], name, { type: 'text/csv' });
+/** 把檔案交給 iPhone 的分享面板（可「儲存到檔案」）；不支援就直接下載。使用者取消回傳 false。 */
+async function saveFile(name, text, mime) {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const file = new File([blob], name, { type: mime });
   try {
     if (navigator.canShare?.({ files: [file] })) {
       await navigator.share({ files: [file], title: name });
@@ -809,18 +809,36 @@ async function exportCsv() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     }
-    store.setMeta({ lastBackupAt: Date.now() });
-    toast(`已匯出 ${s.transactions.length} 筆`);
-    render();
+    return true;
   } catch (err) {
     if (err?.name !== 'AbortError') toast('匯出失敗：' + (err?.message || err));
+    return false;
   }
+}
+
+/** 完整備份（JSON）：紀錄＋分類＋預算＋偏好，換手機用這個還原。 */
+async function exportFull() {
+  const s = store.get();
+  const ok = await saveFile(`記帳完整備份-${localDate()}.json`, JSON.stringify(store.exportBackup(), null, 1), 'application/json');
+  if (!ok) return;
+  store.setMeta({ lastBackupAt: Date.now() });
+  toast(`已匯出完整備份（${s.transactions.length} 筆紀錄＋設定）`);
+  render();
+}
+
+/** CSV：給 Excel 看，只有紀錄（不算完整備份，不更新「上次備份」）。 */
+async function exportCsv() {
+  const s = store.get();
+  if (!s.transactions.length) return toast('還沒有紀錄可以匯出');
+  const ok = await saveFile(`記帳紀錄-${localDate()}.csv`, toCsv(s.transactions), 'text/csv');
+  if (ok) toast(`已匯出 ${s.transactions.length} 筆（CSV 不含設定）`);
 }
 
 $file.addEventListener('change', async () => {
   const f = $file.files?.[0];
   if (!f) return;
   const text = await f.text();
+  if (/\.json$/i.test(f.name) || text.trimStart().startsWith('{')) return restoreFromJson(text);
   const { records, errors } = fromCsv(text);
   if (!records.length) return toast(errors[0] || '沒有可匯入的資料');
   const msg = `找到 ${records.length} 筆紀錄${errors.length ? `，另有 ${errors.length} 列格式錯誤會略過` : ''}。要匯入嗎？（重複的會自動略過）`;
@@ -832,6 +850,26 @@ $file.addEventListener('change', async () => {
     render();
   });
 });
+
+function restoreFromJson(text) {
+  let data;
+  try {
+    data = store.validateBackup(JSON.parse(text));
+  } catch (e) {
+    return toast(e instanceof SyntaxError ? '檔案損毀，無法讀取' : e.message);
+  }
+  const when = data.exportedAt ? new Date(data.exportedAt).toLocaleString('zh-TW', { dateStyle: 'medium', timeStyle: 'short' }) : '不明時間';
+  const budgetCount = Object.keys(data.budgets?.byCategory || {}).length + (data.budgets?.total ? 1 : 0);
+  const msg = `從 ${when} 的完整備份還原？\n\n`
+    + `・紀錄 ${data.transactions.length} 筆：和目前的合併，重複的略過\n`
+    + `・分類 ${data.categories.length} 個、預算 ${budgetCount} 項、排序偏好：改成備份的設定`;
+  if (!confirm(msg)) return;
+  safe(() => {
+    const { added, skipped } = store.restoreBackup(data);
+    toast(`還原完成：新增 ${added} 筆${skipped ? `，略過重複 ${skipped} 筆` : ''}，設定已套用`);
+    render();
+  });
+}
 
 // ---------- 關掉放大手勢 ----------
 // iOS 不一定遵守 viewport 的 user-scalable=no，所以再攔截兩指縮放（Safari 專有的 gesture 事件）

@@ -210,3 +210,83 @@ export function activeCategoryBudgets() {
     .filter((c) => state.budgets.byCategory[c.id] > 0)
     .map((c) => ({ category: c, limit: state.budgets.byCategory[c.id] }));
 }
+
+// ---------- 完整備份（JSON：紀錄＋分類＋預算＋偏好） ----------
+
+export const BACKUP_APP = 'pocket-ledger';
+export const BACKUP_VERSION = 1;
+
+/** 產生完整備份物件。匯率快取、備份時間等只跟這支手機有關的資料不放進去。 */
+export function exportBackup() {
+  return {
+    app: BACKUP_APP,
+    backupVersion: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    categories: state.categories,
+    budgets: state.budgets,
+    settings: { sortMode: state.meta.sortMode ?? null },
+    transactions: state.transactions,
+  };
+}
+
+/** 檢查是不是本 App 的完整備份；不是就丟出看得懂的錯誤。 */
+export function validateBackup(data) {
+  if (!data || data.app !== BACKUP_APP) throw new Error('這不是口袋記帳本的備份檔');
+  if (!(data.backupVersion <= BACKUP_VERSION)) throw new Error('備份檔版本比 App 新，請先更新 App');
+  if (!Array.isArray(data.categories) || !Array.isArray(data.transactions)) throw new Error('備份檔內容不完整');
+  return data;
+}
+
+/**
+ * 從完整備份還原。
+ * - 分類：依 id、再依「類型＋名稱」對應到這支手機的分類；名稱、顏色、刪除狀態、順序以備份為準。
+ *   這支手機才有、且有紀錄的分類保留在後面（顏色和備份撞到就改用沒用過的）；沒用過的直接移除。
+ * - 預算、排序偏好：以備份為準（分類 id 會換成對應後的 id）。
+ * - 紀錄：合併，依 id（沒有 id 就比內容）略過重複。
+ */
+export function restoreBackup(raw) {
+  const data = validateBackup(raw);
+  const idMap = new Map(); // 備份的分類 id → 這支手機的分類 id
+  const restored = [];
+  for (const bc of data.categories) {
+    const local = state.categories.find((c) => c.id === bc.id)
+      || state.categories.find((c) => c.type === bc.type && c.name === bc.name && !restored.includes(c));
+    const merged = { ...(local || {}), ...bc, id: local ? local.id : bc.id };
+    idMap.set(bc.id, merged.id);
+    restored.push(merged);
+  }
+  const restoredIds = new Set(restored.map((c) => c.id));
+  // 這支手機才有的分類：有紀錄的保留，沒用過的（例如新手機的預設分類）移除，避免重複雜亂
+  const used = new Set(state.transactions.map((t) => t.categoryId));
+  const extras = state.categories.filter((c) => !restoredIds.has(c.id) && used.has(c.id));
+  state.categories = [...restored, ...extras];
+  // 這支手機才有的分類：顏色若和備份的撞到，改用沒用過的
+  for (const c of extras) {
+    if (c.type !== 'expense' || c.color == null || c.archived) continue;
+    const clash = state.categories.some((x) => x !== c && x.type === 'expense' && !x.archived && x.color === c.color);
+    if (clash) { c.color = null; c.color = nextColor('expense'); }
+  }
+
+  const byCategory = {};
+  for (const [id, amount] of Object.entries(data.budgets?.byCategory || {})) {
+    if (amount > 0) byCategory[idMap.get(id) || id] = amount;
+  }
+  state.budgets = { total: data.budgets?.total > 0 ? data.budgets.total : null, byCategory };
+  if (data.settings?.sortMode) state.meta.sortMode = data.settings.sortMode;
+
+  const ids = new Set(state.transactions.map((t) => t.id));
+  const prints = new Set(state.transactions.map(fingerprint));
+  let added = 0;
+  let skipped = 0;
+  for (const t of data.transactions) {
+    const rec = { ...t, categoryId: idMap.get(t.categoryId) || t.categoryId };
+    if (rec.id ? ids.has(rec.id) : prints.has(fingerprint(rec))) { skipped++; continue; }
+    if (!rec.id) rec.id = uid();
+    state.transactions.push(rec);
+    ids.add(rec.id);
+    prints.add(fingerprint(rec));
+    added++;
+  }
+  save();
+  return { added, skipped, categories: restored.length };
+}

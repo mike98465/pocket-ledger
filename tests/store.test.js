@@ -96,3 +96,82 @@ test('預算：設定、取消；刪除的分類不列入；舊資料自動補�
   store.load();
   assert.deepEqual(store.get().budgets, { total: null, byCategory: {} });
 });
+
+test('完整備份：舊手機 → 新手機（分類 id 不同）完整還原', () => {
+  // 舊手機：改名、刪除、新增分類，設預算與排序，記幾筆
+  const food = expenseCat('餐飲');
+  store.renameCategory(food.id, '吃飯');
+  store.archiveCategory(expenseCat('醫療').id);
+  store.addCategory('expense', '寵物');
+  const pet = expenseCat('寵物');
+  store.setTotalBudget(20000);
+  store.setCategoryBudget(food.id, 6000);
+  store.setCategoryBudget(pet.id, 1500);
+  store.setMeta({ sortMode: 'amountDesc' });
+  store.addTransaction({ type: 'expense', currency: 'TWD', amount: 120, categoryId: food.id, date: '2026-11-01', note: '午餐' });
+  store.addTransaction({ type: 'expense', currency: 'TWD', amount: 800, categoryId: pet.id, date: '2026-11-02', note: '飼料' });
+  const backup = JSON.parse(JSON.stringify(store.exportBackup())); // 模擬寫成檔案再讀回
+  const oldCats = store.get().categories.map((c) => [c.type, c.name, c.color, c.archived]);
+
+  // 新手機：全新預設資料（分類 id 都不一樣），先記一筆
+  mem.clear();
+  store.load();
+  const newFood = expenseCat('餐飲');
+  assert.notEqual(newFood.id, food.id);
+  store.addTransaction({ type: 'expense', currency: 'TWD', amount: 50, categoryId: newFood.id, date: '2026-11-03', note: '新手機的早餐' });
+
+  const r = store.restoreBackup(backup);
+  assert.deepEqual([r.added, r.skipped], [2, 0]);
+
+  const s = store.get();
+  // 分類：名稱、顏色、刪除狀態、順序和舊手機一樣；
+  // 新手機的「餐飲」有一筆早餐所以保留在最後，顏色和「吃飯」撞到 → 換成沒用過的第 8 色
+  assert.deepEqual(s.categories.map((c) => [c.type, c.name, c.color, c.archived]), [...oldCats, ['expense', '餐飲', 8, false]]);
+  const eat = expenseCat('吃飯');
+  assert.equal(s.transactions.find((t) => t.note === '新手機的早餐').categoryId, newFood.id);
+  // 預算接到正確的分類
+  assert.equal(s.budgets.total, 20000);
+  assert.equal(s.budgets.byCategory[eat.id], 6000);
+  assert.equal(s.budgets.byCategory[expenseCat('寵物').id], 1500);
+  assert.equal(s.meta.sortMode, 'amountDesc');
+  // 紀錄：3 筆，每筆都指到存在的分類
+  assert.equal(s.transactions.length, 3);
+  for (const t of s.transactions) assert.ok(store.categoryById(t.categoryId), `分類不存在：${t.categoryName}`);
+  assert.equal(s.transactions.find((t) => t.note === '飼料').categoryId, expenseCat('寵物').id);
+
+  // 再還原一次：全部略過，不重複
+  assert.deepEqual([store.restoreBackup(backup).added, store.restoreBackup(backup).skipped], [0, 2]);
+  assert.equal(store.get().transactions.length, 3);
+});
+
+test('完整備份：這支手機才有的分類保留，顏色撞到會換掉', () => {
+  const backup = JSON.parse(JSON.stringify(store.exportBackup()));
+  mem.clear();
+  store.load();
+  store.addCategory('expense', '旅遊'); // 新手機拿到第 8 色
+  store.addTransaction({ type: 'expense', currency: 'TWD', amount: 3000, categoryId: expenseCat('旅遊').id, date: '2026-11-04', note: '機票' });
+  backup.categories.push({ id: 'b-pet', type: 'expense', name: '寵物', color: 8, archived: false }); // 備份裡第 8 色是寵物
+  store.restoreBackup(backup);
+  const travel = expenseCat('旅遊');
+  assert.ok(travel, '新手機的分類要保留');
+  assert.equal(expenseCat('寵物').color, 8);
+  assert.notEqual(travel.color, 8); // 撞色 → 改掉（色盤用完就是灰色 null）
+});
+
+test('完整備份：不是本 App 的檔案會被擋下', () => {
+  assert.throws(() => store.restoreBackup({ foo: 1 }), /不是口袋記帳本的備份檔/);
+  assert.throws(() => store.restoreBackup({ app: 'pocket-ledger', backupVersion: 99, categories: [], transactions: [] }), /版本比 App 新/);
+  assert.throws(() => store.restoreBackup({ app: 'pocket-ledger', backupVersion: 1 }), /不完整/);
+});
+
+test('完整備份：新手機沒用過的預設分類，還原後不會多出來', () => {
+  store.renameCategory(expenseCat('餐飲').id, '吃飯');
+  const backup = JSON.parse(JSON.stringify(store.exportBackup()));
+  mem.clear();
+  store.load(); // 全新手機，什麼都還沒記
+  store.restoreBackup(backup);
+  const names = store.activeCategories('expense').map((c) => c.name);
+  assert.ok(names.includes('吃飯'));
+  assert.ok(!names.includes('餐飲'), '不應該多出沒用過的「餐飲」');
+  assert.equal(store.get().categories.length, backup.categories.length);
+});
