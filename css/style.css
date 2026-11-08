@@ -136,8 +136,9 @@ h2 { font-size: 13px; font-weight: 400; color: var(--text-3); margin: 20px 4px 6
 
 .meta-row { display: flex; gap: 6px; }
 .meta-row label { display: flex; align-items: center; gap: 6px; background: var(--card); border-radius: 10px; padding: 0 10px; min-height: 40px; font-size: 15px; }
-.meta-row label:first-child { flex: none; }
-.meta-row label:last-child { flex: 1; min-width: 0; }
+.meta-row .title-input { flex: 1; min-width: 0; min-height: 46px; }
+.meta-row .title-input input { font-size: 17px; }
+.meta-row .date-input { flex: none; }
 .meta-row input { border: 0; background: none; outline: none; width: 100%; min-width: 0; font-size: 16px; }
 .meta-row input[type="date"] { width: auto; }
 
@@ -193,8 +194,9 @@ h2 { font-size: 13px; font-weight: 400; color: var(--text-3); margin: 20px 4px 6
 .tx:first-child { border-top: 0; }
 .tx:active { background: var(--fill); }
 .tx .body { flex: 1; min-width: 0; }
-.tx .title { font-size: 16px; }
-.tx .note { font-size: 13px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tx .title-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tx .title { font-size: 16px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tx .chip { flex: none; font-size: 12px; line-height: 1; padding: 4px 7px; border-radius: 6px; background: var(--fill); color: var(--text-2); }
 .tx .money { text-align: right; }
 .tx .money .main { font-size: 16px; font-weight: 500; }
 .tx .money .sub { font-size: 12px; color: var(--text-3); }

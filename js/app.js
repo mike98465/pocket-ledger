@@ -168,16 +168,16 @@ function renderRecord() {
           </div>` : ''}
       </div>
 
+      <div class="meta-row">
+        <label class="title-input"><input type="text" id="d-note" placeholder="${draft.type === 'expense' ? '買了什麼？例如：午餐便當' : '什麼收入？例如：VOO 股息'}" value="${esc(draft.note)}" maxlength="40" enterkeyhint="done" aria-label="項目"></label>
+        <label class="date-input"><input type="date" id="d-date" value="${draft.date}" max="9999-12-31" aria-label="日期"></label>
+      </div>
+
       <div class="cats" role="group" aria-label="分類">
         ${store.activeCategories(draft.type).map((c) => `
           <button class="cat" data-cat="${c.id}" aria-pressed="${c.id === catId}">
             ${draft.type === 'expense' ? `<span class="dot" style="background:${seriesColor(c)}"></span>` : ''}${esc(c.name)}
           </button>`).join('')}
-      </div>
-
-      <div class="meta-row">
-        <label><span class="muted">日期</span><input type="date" id="d-date" value="${draft.date}" max="9999-12-31"></label>
-        <label><input type="text" id="d-note" placeholder="備註（可不填）" value="${esc(draft.note)}" maxlength="80" enterkeyhint="done"></label>
       </div>
 
       <div class="keypad">
@@ -270,7 +270,7 @@ function saveDraft() {
     draft.input = '';
     draft.note = '';
     navigator.vibrate?.(10);
-    toast(`已記錄 ${rec.categoryName} ${formatMoney(rec.amount, rec.currency)}`);
+    toast(`已記錄 ${rec.note || rec.categoryName} ${formatMoney(rec.amount, rec.currency)}`);
     renderRecord();
   });
 }
@@ -364,8 +364,10 @@ function renderStats() {
           <button class="tx" data-tx="${t.id}">
             <span class="dot" style="background:${t.type === 'expense' ? seriesColor(store.categoryById(t.categoryId)) : 'var(--income)'}"></span>
             <span class="body">
-              <div class="title">${esc(t.categoryName)}</div>
-              ${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
+              <div class="title-line">
+                <span class="title">${esc(t.note || t.categoryName)}</span>
+                ${t.note ? `<span class="chip">${esc(t.categoryName)}</span>` : ''}
+              </div>
             </span>
             <span class="money num">
               <div class="main ${t.type}">${t.type === 'income' ? '+' : '-'}${formatMoney(t.amount, t.currency)}</div>
@@ -438,7 +440,7 @@ function openEditor(id) {
             <select id="e-cat">${options.map((c) => `<option value="${c.id}" ${c.id === e.categoryId ? 'selected' : ''}>${esc(c.name)}${c.archived ? '（已刪除）' : ''}</option>`).join('')}</select>
           </label>
           <label class="field"><span>日期</span><input id="e-date" type="date" value="${e.date}"></label>
-          <label class="field"><span>備註</span><input id="e-note" value="${esc(e.note)}" maxlength="80" placeholder="可不填"></label>
+          <label class="field"><span>項目</span><input id="e-note" value="${esc(e.note)}" maxlength="40" placeholder="買了什麼（可不填）"></label>
         </div>
         <button type="button" class="danger-btn" data-act="delete">刪除這筆</button>
       </form>`;
@@ -469,7 +471,7 @@ function openEditor(id) {
     const act = b.dataset.act;
     if (act === 'close') return $sheet.close();
     if (act === 'delete') {
-      if (!confirm(`確定刪除這筆 ${t.categoryName} ${formatMoney(t.amount, t.currency)}？`)) return;
+      if (!confirm(`確定刪除這筆 ${t.note || t.categoryName} ${formatMoney(t.amount, t.currency)}？`)) return;
       return safe(() => { store.deleteTransaction(t.id); $sheet.close(); toast('已刪除'); render(); });
     }
     if (act === 'save') {

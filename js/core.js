@@ -86,7 +86,8 @@ export function monthSummary(transactions, key, categories = []) {
 
 // ---------- CSV ----------
 
-export const CSV_HEADER = ['日期', '類型', '分類', '幣別', '金額', '匯率', '台幣金額', '備註', 'id', '建立時間'];
+// 「項目」＝使用者輸入的花費標題（資料欄位名稱是 note）。舊版 CSV 叫「備註」，匯入時兩者都接受。
+export const CSV_HEADER = ['日期', '類型', '分類', '幣別', '金額', '匯率', '台幣金額', '項目', 'id', '建立時間'];
 const TYPE_LABEL = { expense: '支出', income: '收入' };
 const TYPE_FROM_LABEL = { 支出: 'expense', 收入: 'income', expense: 'expense', income: 'income' };
 
@@ -148,6 +149,7 @@ export function fromCsv(text) {
   if (!rows.length) return { records: [], errors: ['檔案是空的'] };
   const header = rows[0].map((h) => h.trim());
   const idx = Object.fromEntries(CSV_HEADER.map((h) => [h, header.indexOf(h)]));
+  if (idx['項目'] < 0) idx['項目'] = header.indexOf('備註');
   for (const need of ['日期', '類型', '分類', '幣別', '金額']) {
     if (idx[need] < 0) return { records: [], errors: [`缺少欄位「${need}」，請用本 App 匯出的檔案`] };
   }
@@ -177,7 +179,7 @@ export function fromCsv(text) {
       rate,
       twd: toTwd(amount, currency, rate),
       date,
-      note: get(r, '備註'),
+      note: get(r, '項目'),
       createdAt: get(r, '建立時間') || `${date}T00:00:00.000Z`,
     });
   });

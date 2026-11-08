@@ -95,3 +95,12 @@ test('needsBackupReminder', () => {
   assert.equal(needsBackupReminder({ txCount: 5, firstUseAt: 1, lastBackupAt: 75 * day }, now), false);
   assert.equal(needsBackupReminder({ txCount: 5, firstUseAt: 1, lastDismissAt: 90 * day }, now), false);
 });
+
+test('fromCsv：舊版「備註」欄位也能匯入成項目', () => {
+  const { records } = fromCsv('日期,類型,分類,幣別,金額,匯率,備註\n2026-11-01,支出,餐飲,TWD,100,,午餐便當\n');
+  assert.equal(records[0].note, '午餐便當');
+});
+
+test('toCsv：欄位名稱是「項目」', () => {
+  assert.ok(toCsv([]).startsWith('﻿日期,類型,分類,幣別,金額,匯率,台幣金額,項目,'));
+});
