@@ -1,12 +1,13 @@
 import {
   CURRENCIES, parseAmount, formatMoney, formatMinor, minorToInput, toTwd,
   localDate, monthKey, shiftMonth, monthSummary, toCsv, fromCsv, needsBackupReminder, draftProblem,
+  SORT_MODES, sortItems, isDateSort,
 } from './core.js';
 import * as store from './store.js';
 
 const RATE_URL = 'https://open.er-api.com/v6/latest/USD';
 const RATE_MAX_AGE = 6 * 3600 * 1000;
-const APP_VERSION = 'v5'; // 要和 sw.js 的 VERSION 一致（有測試檢查）
+const APP_VERSION = 'v6'; // 要和 sw.js 的 VERSION 一致（有測試檢查）
 
 const $screen = document.getElementById('screen');
 const $sheet = document.getElementById('sheet');
@@ -318,6 +319,26 @@ function donutSvg(byCategory, total) {
     ${segs.join('')}</svg>`;
 }
 
+/** 明細的一列。showDate：依金額排序時在標題下方標出日期。 */
+function txRow(t, showDate) {
+  const [, m, d] = t.date.split('-').map(Number);
+  return `
+    <button class="tx" data-tx="${t.id}">
+      <span class="dot" style="background:${t.type === 'expense' ? seriesColor(store.categoryById(t.categoryId)) : 'var(--income)'}"></span>
+      <span class="body">
+        <div class="title-line">
+          <span class="title">${esc(t.note || t.categoryName)}</span>
+          ${t.note ? `<span class="chip">${esc(t.categoryName)}</span>` : ''}
+        </div>
+        ${showDate ? `<div class="when num">${m}/${d}</div>` : ''}
+      </span>
+      <span class="money num">
+        <div class="main ${t.type}">${t.type === 'income' ? '+' : '-'}${formatMoney(t.amount, t.currency)}</div>
+        ${t.currency === 'USD' ? `<div class="sub">≈ ${formatMoney(t.twd, 'TWD')} · @${t.rate}</div>` : ''}
+      </span>
+    </button>`;
+}
+
 function renderStats() {
   const s = store.get();
   const expenseOrder = s.categories.filter((c) => c.type === 'expense');
@@ -329,13 +350,17 @@ function renderStats() {
   if (ui.focusCat && !sum.byCategory.some((c) => c.categoryId === ui.focusCat)) ui.focusCat = null;
   const focus = sum.byCategory.find((c) => c.categoryId === ui.focusCat);
 
-  // 依日期分組
+  const sortMode = s.meta.sortMode in SORT_MODES ? s.meta.sortMode : 'newest';
+  const sorted = sortItems(sum.items, sortMode);
+  // 依日期排序時按天分組；依金額排序時是一整串清單
   const days = [];
-  for (const t of sum.items) {
-    let d = days[days.length - 1];
-    if (!d || d.date !== t.date) days.push((d = { date: t.date, items: [], net: 0 }));
-    d.items.push(t);
-    d.net += t.type === 'income' ? t.twd : -t.twd;
+  if (isDateSort(sortMode)) {
+    for (const t of sorted) {
+      let d = days[days.length - 1];
+      if (!d || d.date !== t.date) days.push((d = { date: t.date, items: [], net: 0 }));
+      d.items.push(t);
+      d.net += t.type === 'income' ? t.twd : -t.twd;
+    }
   }
 
   $screen.innerHTML = `
@@ -375,27 +400,28 @@ function renderStats() {
         </ul>` : '<div class="empty-state">這個月還沒有支出</div>'}
     </div>
 
-    <h2>明細（點一筆可以修改）</h2>
-    ${days.length ? days.map((d) => `
+    <div class="list-head">
+      <h2>明細（點一筆可以修改）</h2>
+      <label class="sort-picker">
+        <span class="sr-only">排序</span>
+        <select id="sort-mode" aria-label="明細排序">
+          ${Object.entries(SORT_MODES).map(([k, label]) => `<option value="${k}" ${k === sortMode ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+      </label>
+    </div>
+    ${!sorted.length ? '<div class="card empty-state">這個月還沒有紀錄。到「記帳」記第一筆吧！</div>'
+      : isDateSort(sortMode) ? days.map((d) => `
       <div class="day-head"><span>${dayLabel(d.date)}</span><span class="num">${d.net >= 0 ? '+' : ''}${formatMoney(d.net, 'TWD')}</span></div>
-      <div class="card list">
-        ${d.items.map((t) => `
-          <button class="tx" data-tx="${t.id}">
-            <span class="dot" style="background:${t.type === 'expense' ? seriesColor(store.categoryById(t.categoryId)) : 'var(--income)'}"></span>
-            <span class="body">
-              <div class="title-line">
-                <span class="title">${esc(t.note || t.categoryName)}</span>
-                ${t.note ? `<span class="chip">${esc(t.categoryName)}</span>` : ''}
-              </div>
-            </span>
-            <span class="money num">
-              <div class="main ${t.type}">${t.type === 'income' ? '+' : '-'}${formatMoney(t.amount, t.currency)}</div>
-              ${t.currency === 'USD' ? `<div class="sub">≈ ${formatMoney(t.twd, 'TWD')} · @${t.rate}</div>` : ''}
-            </span>
-          </button>`).join('')}
-      </div>`).join('') : '<div class="card empty-state">這個月還沒有紀錄。到「記帳」記第一筆吧！</div>'}
+      <div class="card list">${d.items.map((t) => txRow(t, false)).join('')}</div>`).join('')
+      : `<div class="card list" style="margin-top:6px">${sorted.map((t) => txRow(t, true)).join('')}</div>`}
   `;
 }
+
+$screen.addEventListener('change', (e) => {
+  if (ui.tab !== 'stats' || e.target.id !== 'sort-mode') return;
+  store.setMeta({ sortMode: e.target.value }); // 記住選擇
+  renderStats();
+});
 
 $screen.addEventListener('click', (e) => {
   if (ui.tab !== 'stats') return;
@@ -665,6 +691,16 @@ $file.addEventListener('change', async () => {
     render();
   });
 });
+
+// ---------- 關掉放大手勢 ----------
+// iOS 不一定遵守 viewport 的 user-scalable=no，所以再攔截兩指縮放（Safari 專有的 gesture 事件）
+// 與多指 touchmove。按兩下放大由 CSS touch-action: manipulation 處理。
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
+document.addEventListener('touchmove', (e) => {
+  if (e.touches.length > 1) e.preventDefault();
+}, { passive: false });
 
 // ---------- 啟動 ----------
 

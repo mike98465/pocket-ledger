@@ -60,6 +60,12 @@
 /* ---------- 基本 ---------- */
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; }
+/* 關掉「按兩下放大」：manipulation 只保留捲動和兩指以外的手勢（兩指縮放由 app.js 攔截） */
+html, body { touch-action: manipulation; }
+/* 防止 iOS 長按文字時跳出放大鏡／選取（輸入框除外） */
+body { -webkit-user-select: none; user-select: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+input, textarea, select { -webkit-user-select: text; user-select: text; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 body {
   overflow-x: hidden;
   background: var(--bg);
@@ -202,6 +208,16 @@ h2 { font-size: 13px; font-weight: 400; color: var(--text-3); margin: 20px 4px 6
 .tx .money .sub { font-size: 12px; color: var(--text-3); }
 .tx .expense { color: var(--text); }
 .tx .income { color: var(--income); }
+.list-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.list-head h2 { margin-bottom: 0; }
+.sort-picker select {
+  /* 字級至少 16px，iOS 點選時才不會自動放大畫面 */
+  font-size: 16px; color: var(--accent); background: none; border: 0; padding: 6px 2px; text-align: right;
+  -webkit-appearance: none; appearance: none; cursor: pointer;
+}
+.sort-picker { display: flex; align-items: center; gap: 2px; }
+.sort-picker::after { content: '⌄'; color: var(--accent); font-size: 14px; line-height: 1; transform: translateY(-3px); }
+.tx .when { font-size: 13px; color: var(--text-3); margin-top: 1px; }
 .empty-state { text-align: center; color: var(--text-3); padding: 32px 16px; font-size: 15px; }
 
 /* ---------- 設定畫面 ---------- */

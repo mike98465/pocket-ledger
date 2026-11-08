@@ -2,7 +2,7 @@
 // GitHub Pages 會讓瀏覽器把檔案快取 10 分鐘（max-age=600），所以所有請求都要帶 cache: 'no-cache'
 // 或 'reload'，否則會把舊檔案當成新版存起來。
 // 改了任何檔案就把 VERSION 加一，並同步改 js/app.js 的 APP_VERSION（有測試檢查兩者一致）。
-const VERSION = 'v5';
+const VERSION = 'v6';
 const CACHE = `pocket-ledger-${VERSION}`;
 const NETWORK_TIMEOUT = 3000;
 const ASSETS = [

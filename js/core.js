@@ -84,6 +84,33 @@ export function monthSummary(transactions, key, categories = []) {
   return { income, expense, balance: income - expense, byCategory, items };
 }
 
+// ---------- 明細排序 ----------
+
+export const SORT_MODES = {
+  newest: '最新在前',
+  oldest: '最舊在前',
+  amountDesc: '金額高→低',
+  amountAsc: '金額低→高',
+};
+
+/** 依日期排序時要按天分組；依金額排序時是一整串清單。 */
+export const isDateSort = (mode) => mode === 'newest' || mode === 'oldest';
+
+/**
+ * 排序明細（不改原陣列）。金額一律用換算後的台幣比較，同金額時新的在前。
+ * 未知的 mode 當成 newest。
+ */
+export function sortItems(items, mode) {
+  const byTime = (a, b) => (b.date + b.createdAt).localeCompare(a.date + a.createdAt); // 新→舊
+  const cmp = {
+    newest: byTime,
+    oldest: (a, b) => -byTime(a, b),
+    amountDesc: (a, b) => b.twd - a.twd || byTime(a, b),
+    amountAsc: (a, b) => a.twd - b.twd || byTime(a, b),
+  }[mode] || byTime;
+  return [...items].sort(cmp);
+}
+
 // ---------- CSV ----------
 
 // 「項目」＝使用者輸入的花費標題（資料欄位名稱是 note）。舊版 CSV 叫「備註」，匯入時兩者都接受。

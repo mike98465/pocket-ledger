@@ -116,3 +116,22 @@ test('draftProblem：項目必填，依序提示缺什麼', async () => {
   assert.equal(draftProblem({ ...ok, currency: 'USD', rate: null }), '請先設定匯率');
   assert.equal(draftProblem({ ...ok, currency: 'USD', rate: 32.8 }), null);
 });
+
+test('sortItems：四種排序，不改原陣列', async () => {
+  const { sortItems, isDateSort } = await import('../js/core.js');
+  const items = [
+    { id: 'a', date: '2026-11-01', createdAt: '1', twd: 300 },
+    { id: 'b', date: '2026-11-03', createdAt: '2', twd: 50 },
+    { id: 'c', date: '2026-11-02', createdAt: '3', twd: 300 },
+    { id: 'd', date: '2026-11-03', createdAt: '4', twd: 1200 },
+  ];
+  const ids = (mode) => sortItems(items, mode).map((t) => t.id).join('');
+  assert.equal(ids('newest'), 'dbca');
+  assert.equal(ids('oldest'), 'acbd');
+  assert.equal(ids('amountDesc'), 'dcab'); // 同為 300：較新的 c 在前
+  assert.equal(ids('amountAsc'), 'bcad');
+  assert.equal(ids('???'), 'dbca');
+  assert.equal(items.map((t) => t.id).join(''), 'abcd');
+  assert.equal(isDateSort('oldest'), true);
+  assert.equal(isDateSort('amountAsc'), false);
+});
