@@ -147,13 +147,17 @@ export function deleteTransaction(id) {
   save();
 }
 
-/** 匯入：依 id 去重；分類依「類型＋名稱」對應，沒有就新建。 */
+// 沒有 id 的列（例如在 Excel 手動加的）用內容判斷是否重複
+const fingerprint = (t) => [t.date, t.type, t.categoryName, t.currency, t.amount, t.note || ''].join('\u0001');
+
+/** 匯入：依 id 去重（沒有 id 就比對內容）；分類依「類型＋名稱」對應，沒有就新建。 */
 export function importRecords(records) {
   const ids = new Set(state.transactions.map((t) => t.id));
+  const prints = new Set(state.transactions.map(fingerprint));
   let added = 0;
   let skipped = 0;
   for (const r of records) {
-    if (r.id && ids.has(r.id)) { skipped++; continue; }
+    if (r.id ? ids.has(r.id) : prints.has(fingerprint(r))) { skipped++; continue; }
     let c = state.categories.find((x) => x.type === r.type && x.name === r.categoryName && !x.archived)
       || state.categories.find((x) => x.type === r.type && x.name === r.categoryName);
     if (!c) {
@@ -163,6 +167,7 @@ export function importRecords(records) {
     const rec = { ...r, id: r.id || uid(), categoryId: c.id, categoryName: c.name };
     state.transactions.push(rec);
     ids.add(rec.id);
+    prints.add(fingerprint(rec));
     added++;
   }
   save();

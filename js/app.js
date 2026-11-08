@@ -1,5 +1,5 @@
 import {
-  CURRENCIES, parseAmount, formatMoney, minorToInput, toTwd,
+  CURRENCIES, parseAmount, formatMoney, formatMinor, minorToInput, toTwd,
   localDate, monthKey, shiftMonth, monthSummary, toCsv, fromCsv, needsBackupReminder,
 } from './core.js';
 import * as store from './store.js';
@@ -329,9 +329,9 @@ function renderStats() {
     </div>
 
     <div class="tiles">
-      <div class="card tile"><div class="label">收入</div><div class="value num" style="color:var(--income)">${formatMoney(sum.income, 'TWD')}</div></div>
-      <div class="card tile"><div class="label">支出</div><div class="value num">${formatMoney(sum.expense, 'TWD')}</div></div>
-      <div class="card tile"><div class="label">結餘</div><div class="value num" style="color:${sum.balance < 0 ? 'var(--expense)' : 'var(--text)'}">${formatMoney(sum.balance, 'TWD')}</div></div>
+      <div class="card tile"><div class="label">收入 NT$</div><div class="value num" style="color:var(--income)">${formatMinor(sum.income, 'TWD')}</div></div>
+      <div class="card tile"><div class="label">支出 NT$</div><div class="value num">${formatMinor(sum.expense, 'TWD')}</div></div>
+      <div class="card tile"><div class="label">結餘 NT$</div><div class="value num" style="color:${sum.balance < 0 ? 'var(--expense)' : 'var(--text)'}">${sum.balance < 0 ? '-' : ''}${formatMinor(Math.abs(sum.balance), 'TWD')}</div></div>
     </div>
 
     <h2>支出分類（美金已換算台幣）</h2>
@@ -418,7 +418,7 @@ function openEditor(id) {
       <form class="sheet-inner" method="dialog">
         <div class="sheet-head">
           <button type="button" data-act="close">取消</button>
-          <h3>修改紀錄</h3>
+          <h3 tabindex="-1" autofocus>修改紀錄</h3>
           <button type="button" class="primary" data-act="save">儲存</button>
         </div>
         <div class="seg" role="group" aria-label="收支">

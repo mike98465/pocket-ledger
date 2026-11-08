@@ -61,6 +61,7 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; }
 body {
+  overflow-x: hidden;
   background: var(--bg);
   color: var(--text);
   font: 16px/1.4 var(--font);
@@ -106,7 +107,11 @@ h2 { font-size: 13px; font-weight: 400; color: var(--text-3); margin: 20px 4px 6
 .seg button[aria-pressed="true"] { background: var(--seg-on); color: var(--text); box-shadow: var(--seg-shadow); }
 
 /* ---------- 記帳畫面 ---------- */
-.record { display: flex; flex-direction: column; gap: 10px; }
+.record {
+  display: flex; flex-direction: column; gap: 10px;
+  /* 填滿畫面，讓數字鍵盤貼近拇指 */
+  min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 88px);
+}
 .record-top { display: flex; gap: 8px; }
 .record-top .seg:first-child { flex: 1.4; }
 .record-top .seg:last-child { flex: 1; }
@@ -119,7 +124,7 @@ h2 { font-size: 13px; font-weight: 400; color: var(--text-3); margin: 20px 4px 6
 .rate-line { margin-top: 4px; font-size: 13px; color: var(--text-3); display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
 .rate-line button { color: var(--accent); font-size: 13px; }
 
-.cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.cats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .cat {
   display: flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 40px; padding: 6px 4px; border-radius: 10px;
@@ -136,8 +141,8 @@ h2 { font-size: 13px; font-weight: 400; color: var(--text-3); margin: 20px 4px 6
 .meta-row input { border: 0; background: none; outline: none; width: 100%; min-width: 0; font-size: 16px; }
 .meta-row input[type="date"] { width: auto; }
 
-.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.key { height: 50px; border-radius: 10px; background: var(--card); font-size: 24px; font-weight: 500; }
+.keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: auto; }
+.key { height: 56px; border-radius: 10px; background: var(--card); font-size: 24px; font-weight: 500; }
 .key:active { background: var(--fill-strong); }
 .key svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; vertical-align: middle; }
 .save {
@@ -158,8 +163,8 @@ h2 { font-size: 13px; font-weight: 400; color: var(--text-3); margin: 20px 4px 6
 .icon-btn { width: 40px; height: 40px; border-radius: 50%; background: var(--card); color: var(--accent); display: grid; place-items: center; }
 .icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 
-.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.tile { padding: 10px 12px; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tile { padding: 10px 12px; min-width: 0; }
 .tile .label { font-size: 12px; color: var(--text-3); }
 .tile .value { font-size: 17px; font-weight: 600; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -218,7 +223,7 @@ h2 { font-size: 13px; font-weight: 400; color: var(--text-3); margin: 20px 4px 6
 .sheet::backdrop { background: rgba(0, 0, 0, 0.4); }
 .sheet-inner { padding: 14px 16px calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; gap: 10px; }
 .sheet-head { display: flex; justify-content: space-between; align-items: center; }
-.sheet-head h3 { margin: 0; font-size: 17px; }
+.sheet-head h3 { margin: 0; font-size: 17px; outline: none; }
 .sheet-head button { color: var(--accent); font-size: 16px; padding: 6px 2px; }
 .sheet-head .primary { font-weight: 600; }
 .field { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 14px; border-top: 0.5px solid var(--hairline); }
